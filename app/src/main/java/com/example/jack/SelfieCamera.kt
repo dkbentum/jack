@@ -15,11 +15,29 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material3.*
@@ -35,10 +53,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -71,12 +86,16 @@ fun ensureCameraPermission(context: Context): Boolean {
  * Full-screen selfie camera that runs inside Jack (no external camera app, so it works in
  * kiosk / Lock Task mode). Uses the front camera, or the back one if the tablet has no front camera.
  *
+ * v3.2 look: black workshop frame, CHECK IN / CHECK OUT tag + the person's name on top,
+ * a face guide over the preview, a big shutter at the bottom and a "VOL ▼" key hint.
+ *
  * The photo is taken with the on-screen shutter button or the tablet's **Volume Down** key.
  * [onCaptured] receives an upright photo, scaled to at most 720 px on its longest side.
  */
 @Composable
 fun SelfieCaptureDialog(
-    title: String,
+    personName: String,
+    isCheckOut: Boolean,
     onCaptured: (Bitmap) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -97,6 +116,7 @@ fun SelfieCaptureDialog(
 
     var cameraReady by remember { mutableStateOf(false) }
     var capturing by remember { mutableStateOf(false) }
+    var flash by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val focusRequester = remember { FocusRequester() }
 
@@ -135,6 +155,8 @@ fun SelfieCaptureDialog(
     fun capture() {
         if (!cameraReady || capturing) return
         capturing = true
+        flash = true
+        error = null
         imageCapture.takePicture(
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageCapturedCallback() {
@@ -160,14 +182,23 @@ fun SelfieCaptureDialog(
         )
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)
-    ) {
-        Box(
+    // Short white flash so people know the photo was taken.
+    val flashAlpha by animateFloatAsState(
+        targetValue = if (flash) 0.85f else 0f,
+        animationSpec = tween(durationMillis = if (flash) 60 else 260),
+        label = "flash"
+    )
+    LaunchedEffect(flash) {
+        if (flash) { delay(90); flash = false }
+    }
+
+    val actionColor = if (isCheckOut) JackColors.Amber else JackColors.Blue
+
+    JackFullScreenDialog(onDismissRequest = onDismiss) {
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .background(JackColors.Ink)
                 // Volume Down = shutter. Handled here because the camera dialog has its own window.
                 .onPreviewKeyEvent { event ->
                     if (event.key == Key.VolumeDown) {
@@ -184,70 +215,192 @@ fun SelfieCaptureDialog(
                 try { focusRequester.requestFocus() } catch (_: Exception) {}
             }
 
-            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-
-            // Title / instructions
-            Text(
-                text = "$title\nLook at the camera — press Volume Down or tap the button",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 32.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-
-            error?.let {
-                Text(
-                    text = it,
-                    color = Color.White,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp)
-                        .background(Color(0xCCB00020), RoundedCornerShape(12.dp))
-                        .padding(16.dp)
-                )
-            }
-
+            // ---------- Top: who and what ----------
             Row(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .padding(bottom = 40.dp, start = 24.dp, end = 24.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                ) { Text("Cancel") }
+                BrandLogo(size = 32.dp, tint = JackColors.Paper)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    StatusChip(if (isCheckOut) "Check out" else "Check in", actionColor, filled = true)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = personName,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = JackColors.Paper,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = JackColors.Paper)
+                }
+            }
+            StripeBar(stripe = actionColor, gap = JackColors.Steel)
 
-                // Big round shutter button
-                Button(
-                    onClick = { capture() },
-                    enabled = cameraReady && !capturing,
-                    shape = CircleShape,
-                    modifier = Modifier.size(84.dp),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    if (capturing) {
-                        CircularProgressIndicator(modifier = Modifier.size(32.dp), color = Color.White, strokeWidth = 3.dp)
-                    } else {
-                        Icon(Icons.Default.CameraAlt, contentDescription = "Capture", modifier = Modifier.size(40.dp))
+            // ---------- Middle: live preview + face guide ----------
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(Color.Black)
+            ) {
+                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                FaceGuide(color = actionColor, modifier = Modifier.fillMaxSize())
+
+                Text(
+                    text = "FIT YOUR FACE IN THE FRAME",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = JackColors.Paper,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp)
+                        .background(JackColors.Ink.copy(alpha = 0.7f), MaterialTheme.shapes.extraSmall)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+
+                if (!cameraReady && error == null) {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(color = JackColors.Paper, strokeWidth = 3.dp)
+                        Spacer(Modifier.height(12.dp))
+                        Text("STARTING CAMERA…", style = MaterialTheme.typography.labelLarge, color = JackColors.Paper)
                     }
                 }
 
-                Spacer(modifier = Modifier.width(80.dp))  // balances the Cancel button
+                error?.let {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .background(JackColors.Red, MaterialTheme.shapes.small)
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = JackColors.Paper)
+                        Spacer(Modifier.width(10.dp))
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = JackColors.Paper)
+                    }
+                }
+
+                // Flash overlay
+                if (flashAlpha > 0f) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Color.White.copy(alpha = flashAlpha))
+                    )
+                }
             }
 
-            if (!cameraReady && error == null) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color.White)
+            // ---------- Bottom: shutter ----------
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, JackColors.Graphite),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = JackColors.Paper),
+                        modifier = Modifier.height(48.dp)
+                    ) { Text("CANCEL", style = MaterialTheme.typography.labelLarge) }
+                }
+
+                ShutterButton(
+                    enabled = cameraReady && !capturing,
+                    busy = capturing,
+                    color = actionColor,
+                    onClick = { capture() }
+                )
+
+                // Reminder that the tablet's Volume Down key also takes the photo.
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .border(1.dp, JackColors.Graphite, MaterialTheme.shapes.extraSmall)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text("VOL ▼", style = MaterialTheme.typography.labelLarge, color = JackColors.Paper)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text("ALSO SNAPS", style = MaterialTheme.typography.labelSmall, color = JackColors.Gray)
+                    }
+                }
             }
         }
+    }
+}
+
+/** Big round shutter: white ring, coloured centre. */
+@Composable
+private fun ShutterButton(enabled: Boolean, busy: Boolean, color: Color, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(88.dp)
+            .border(4.dp, if (enabled || busy) JackColors.Paper else JackColors.Graphite, CircleShape)
+            .padding(8.dp)
+            .clip(CircleShape)
+            .background(if (enabled) color else JackColors.Steel)
+            .clickable(enabled = enabled, onClick = onClick)
+            .semantics { contentDescription = "Take photo" }
+    ) {
+        if (busy) {
+            CircularProgressIndicator(modifier = Modifier.size(32.dp), color = JackColors.Paper, strokeWidth = 3.dp)
+        } else {
+            Icon(Icons.Default.CameraAlt, contentDescription = null, tint = JackColors.Paper, modifier = Modifier.size(32.dp))
+        }
+    }
+}
+
+/** Darkens everything outside an oval face guide and marks its corners like a viewfinder. */
+@Composable
+private fun FaceGuide(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val guideW = minOf(size.width * 0.70f, size.height * 0.55f)
+        val guideH = guideW * 1.3f
+        val left = (size.width - guideW) / 2f
+        val top = (size.height - guideH) / 2f - size.height * 0.03f
+        val oval = Rect(left, top, left + guideW, top + guideH)
+
+        // Dim outside the oval
+        val shade = Path().apply {
+            fillType = PathFillType.EvenOdd
+            addRect(Rect(0f, 0f, size.width, size.height))
+            addOval(oval)
+        }
+        drawPath(shade, Color.Black.copy(alpha = 0.40f))
+        drawOval(
+            color = Color.White.copy(alpha = 0.85f),
+            topLeft = oval.topLeft,
+            size = oval.size,
+            style = Stroke(width = 2.dp.toPx())
+        )
+
+        // Viewfinder corner brackets
+        val arm = guideW * 0.14f
+        val w = 4.dp.toPx()
+        val pad = 10.dp.toPx()
+        val l = oval.left - pad; val t = oval.top - pad; val r = oval.right + pad; val b = oval.bottom + pad
+        fun corner(x: Float, y: Float, dx: Float, dy: Float) {
+            drawLine(color, Offset(x, y), Offset(x + dx, y), strokeWidth = w, cap = StrokeCap.Square)
+            drawLine(color, Offset(x, y), Offset(x, y + dy), strokeWidth = w, cap = StrokeCap.Square)
+        }
+        corner(l, t, arm, arm)
+        corner(r, t, -arm, arm)
+        corner(l, b, arm, -arm)
+        corner(r, b, -arm, -arm)
     }
 }
 

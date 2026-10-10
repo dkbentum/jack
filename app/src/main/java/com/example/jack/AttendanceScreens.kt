@@ -50,6 +50,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
@@ -202,141 +204,237 @@ fun AttendanceDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text("Check In / Check Out", fontWeight = FontWeight.Bold)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 560.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Text(
-                    text = "Enter your Attendee ID, then take a selfie to check in or out.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+    val actionColor = if (isCheckedIn) JackColors.Amber else JackColors.Blue
 
-                // Read-only ID & Name Preview Box
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(1.dp, if (matchedUser != null) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = if (attendeeId.isEmpty()) "Tap ID digits..." else attendeeId,
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (attendeeId.isEmpty()) Color.Gray else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        if (attendeeId.isNotBlank()) {
-                            if (isAmbiguousId) {
-                                Text(
-                                    text = "⚠️ This ID belongs to more than one person. Please see an admin.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            } else if (matchedUser != null) {
-                                Text(
-                                    text = "✅ ${matchedUser.name} [${matchedUser.tag}]",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF4CAF50)
-                                )
-                                Text(
-                                    text = if (openVisit != null) "🟢 In the building ${formatSince(openVisit.timestamp)}" else "Not checked in",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                Text(
-                                    text = "⚠️ ID not registered in database",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error
-                                )
+    fun openCamera() {
+        if (!canProceed) return
+        cameraMessage = null
+        // Built-in camera (works in kiosk mode). Device owner grants itself the permission.
+        if (ensureCameraPermission(context)) {
+            showCamera = true
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    // v3.3: full-screen kiosk page — big ID display, who-it-is card, keypad, one big action button.
+    JackFullScreenDialog(onDismissRequest = onDismiss) {
+        Surface(modifier = Modifier.fillMaxSize(), color = JackColors.Concrete) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // ---------- Top bar ----------
+                Surface(color = JackColors.Paper) {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            JackIconButton(Icons.Default.Close, "Cancel", onDismiss)
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("CHECK IN / OUT", style = MaterialTheme.typography.headlineSmall, color = JackColors.Ink)
+                                Text("ENTER YOUR ATTENDEE ID", style = MaterialTheme.typography.labelSmall, color = JackColors.Graphite)
                             }
+                            BrandLogo(size = 36.dp)
                         }
+                        StripeBar()
                     }
                 }
 
-                // Custom On-Screen Keypad
-                CustomKeypad(
-                    onCharClick = { digit -> attendeeId += digit },
-                    onBackspace = { if (attendeeId.isNotEmpty()) attendeeId = attendeeId.dropLast(1) },
-                    onClear = { attendeeId = "" },
-                    startInNumberMode = true  // digits first; "ABC" for IDs that contain letters
-                )
+                // ---------- Body ----------
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    AttendeeIdDisplay(attendeeId = attendeeId, matched = canProceed, error = attendeeId.isNotBlank() && !canProceed)
 
-                cameraMessage?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (canProceed) {
-                        cameraMessage = null
-                        // Built-in camera (works in kiosk mode). Device owner grants itself the permission.
-                        if (ensureCameraPermission(context)) {
-                            showCamera = true
-                        } else {
-                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                        }
+                    when {
+                        attendeeId.isBlank() -> IdHintCard()
+                        isAmbiguousId -> IdProblemCard(
+                            title = "This ID belongs to more than one person",
+                            detail = "Please ask an admin to fix it in Settings → Users."
+                        )
+                        matchedUser == null -> IdProblemCard(
+                            title = "ID not registered",
+                            detail = "Check the number, or ask an admin to add you."
+                        )
+                        else -> MatchedPersonCard(user = matchedUser, openVisit = openVisit)
                     }
-                },
-                enabled = canProceed,
-                colors = if (isCheckedIn) {
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-                } else {
-                    ButtonDefaults.buttonColors()
-                },
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(if (isCheckedIn) "Take Selfie & Check Out" else "Take Selfie & Check In")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+
+                    CustomKeypad(
+                        onCharClick = { digit -> attendeeId += digit },
+                        onBackspace = { if (attendeeId.isNotEmpty()) attendeeId = attendeeId.dropLast(1) },
+                        onClear = { attendeeId = "" },
+                        startInNumberMode = true  // digits first; "ABC" for IDs that contain letters
+                    )
+
+                    cameraMessage?.let {
+                        Text(it, color = JackColors.Red, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                // ---------- Action ----------
+                Surface(color = JackColors.Paper, border = BorderStroke(1.dp, JackColors.Line)) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        JackPrimaryButton(
+                            text = when {
+                                !canProceed -> "Enter your ID"
+                                isCheckedIn -> "Take selfie · Check out"
+                                else -> "Take selfie · Check in"
+                            },
+                            onClick = { openCamera() },
+                            enabled = canProceed,
+                            icon = Icons.Default.CameraAlt,
+                            color = actionColor,
+                            height = 64.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "A selfie is required both ways so nobody can check in or out for someone else.",
+                            style = HintStyle,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
             }
         }
-    )
+    }
 
     if (showCamera && matchedUser != null) {
         SelfieCaptureDialog(
-            title = if (isCheckedIn) "Check out: ${matchedUser.name}" else "Check in: ${matchedUser.name}",
+            personName = matchedUser.name,
+            isCheckOut = isCheckedIn,
             onCaptured = { bitmap ->
                 showCamera = false
                 handleSelfie(bitmap)
             },
             onDismiss = { showCamera = false }
         )
+    }
+}
+
+
+
+/** Big black ID readout (looks like a machine display). */
+@Composable
+private fun AttendeeIdDisplay(attendeeId: String, matched: Boolean, error: Boolean) {
+    val edge = when {
+        matched -> JackColors.Green
+        error -> JackColors.Red
+        else -> JackColors.Steel
+    }
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = JackColors.Ink,
+        border = BorderStroke(2.dp, edge),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+            Text("ATTENDEE ID", style = MaterialTheme.typography.labelSmall, color = JackColors.Gray)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = if (attendeeId.isEmpty()) "_ _ _ _" else attendeeId,
+                style = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace, letterSpacing = 4.sp),
+                color = if (attendeeId.isEmpty()) JackColors.Graphite else JackColors.Paper,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun IdHintCard() {
+    JackCard(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Person, contentDescription = null, tint = JackColors.Gray, modifier = Modifier.size(36.dp))
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("Type your ID on the keypad", style = MaterialTheme.typography.titleSmall, color = JackColors.Ink)
+                Text("Your name appears here when the ID is found.", style = HintStyle)
+            }
+        }
+    }
+}
+
+@Composable
+private fun IdProblemCard(title: String, detail: String) {
+    JackCard(modifier = Modifier.fillMaxWidth(), color = JackColors.RedTint, borderColor = JackColors.Red) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Warning, contentDescription = null, tint = JackColors.Red, modifier = Modifier.size(32.dp))
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text(title, style = MaterialTheme.typography.titleSmall, color = JackColors.Red)
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = JackColors.Graphite)
+            }
+        }
+    }
+}
+
+/**
+ * Who the ID belongs to. When they are checking out, their check-in photo is shown so the
+ * person at the kiosk (and anyone watching) can see it is really them.
+ */
+@Composable
+private fun MatchedPersonCard(user: UserRecord, openVisit: AttendanceRecord?) {
+    val photo by produceState<android.graphics.Bitmap?>(initialValue = null, openVisit?.selfiePath) {
+        value = withContext(Dispatchers.IO) {
+            try { decodeThumbnail(openVisit?.selfiePath, targetPx = 240) } catch (_: Exception) { null }
+        }
+    }
+    JackCard(modifier = Modifier.fillMaxWidth(), borderColor = JackColors.Green) {
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(JackColors.Ink),
+                contentAlignment = Alignment.Center
+            ) {
+                val bmp = photo
+                if (bmp != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "Check-in photo of ${user.name}",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Text(
+                        user.name.trim().take(1).uppercase().ifEmpty { "?" },
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = JackColors.Paper
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    user.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = JackColors.Ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusChip(user.tag, tagColor(user.tag))
+                    Spacer(Modifier.width(6.dp))
+                    if (openVisit != null) {
+                        StatusChip("In ${formatSince(openVisit.timestamp)}", JackColors.Green, filled = true)
+                    } else {
+                        StatusChip("Not in", JackColors.Gray)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -493,51 +591,36 @@ fun rememberAttendanceSnapshot(): AttendanceSnapshot? {
     return snapshot
 }
 
-/** v3.0 "Who is in the Building": a grid of photo tiles that fills the rest of the portrait screen. */
+/** "WHO IS IN THE BUILDING" heading with the live count. Shown inside the scrolling dashboard. */
 @Composable
-fun WhoIsInTheBuildingCard(snapshot: AttendanceSnapshot?, modifier: Modifier = Modifier) {
-    val people = snapshot?.inBuilding.orEmpty()
+fun RosterHeader(count: Int) {
+    SectionLabel(
+        text = "Who is in the building",
+        trailing = { StatusChip("$count in", JackColors.Green, filled = count > 0) }
+    )
+}
 
-    JackCard(modifier = modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            SectionLabel(
-                text = "Who is in the building",
-                trailing = { StatusChip("${people.size} in", JackColors.Green, filled = people.isNotEmpty()) }
-            )
-            Spacer(Modifier.height(14.dp))
-
-            if (snapshot != null && people.isEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    BrandLogo(size = 64.dp, tint = JackColors.Line)
-                    Spacer(Modifier.height(12.dp))
-                    Text("Nobody is checked in right now.", style = MaterialTheme.typography.titleSmall, color = JackColors.Graphite)
-                    Text("Tap CHECK IN / OUT above to start.", style = HintStyle)
-                }
-            } else {
-                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                    columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(people.size) { index ->
-                        val (record, user) = people[index]
-                        PersonTile(record, user)
-                    }
-                }
-            }
+/** Shown when nobody is checked in. */
+@Composable
+fun RosterEmptyState() {
+    JackCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            BrandLogo(size = 64.dp, tint = JackColors.Line)
+            Spacer(Modifier.height(12.dp))
+            Text("Nobody is checked in right now.", style = MaterialTheme.typography.titleSmall, color = JackColors.Graphite)
+            Text("Tap CHECK IN / OUT above to start.", style = HintStyle)
         }
     }
 }
 
 /** One person in the building: photo, name, tag and since-when. */
 @Composable
-private fun PersonTile(record: AttendanceRecord, user: UserRecord?) {
+fun PersonTile(record: AttendanceRecord, user: UserRecord?) {
     val photo by produceState<android.graphics.Bitmap?>(initialValue = null, record.selfiePath) {
         value = withContext(Dispatchers.IO) {
             try { decodeThumbnail(record.selfiePath, targetPx = 320) } catch (_: Exception) { null }

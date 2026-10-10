@@ -441,7 +441,10 @@ class MainActivity : ComponentActivity() {
                     if (showSettingsDialog) {
                         SettingsDialog(
                             context = LocalContext.current,
-                            onDismiss = { showSettingsDialog = false }
+                            onDismiss = { showSettingsDialog = false },
+                            // v3.1: Settings stays open underneath; these open on top of it.
+                            onOpenConnection = { showConfigDialog = true },
+                            onOpenAlerts = { showAlertsDialog = true }
                         )
                     }
 

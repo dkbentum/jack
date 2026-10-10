@@ -336,3 +336,35 @@ fun StatTile(label: String, value: String, modifier: Modifier = Modifier, valueC
 /** Standard text style for small secondary information. */
 val HintStyle: TextStyle
     @Composable get() = MaterialTheme.typography.bodySmall.copy(color = JackColors.Graphite)
+
+
+/**
+ * v3.3.1: a page that really covers the whole screen, top to bottom.
+ * A plain Compose Dialog window only grows as tall as its content even with
+ * usePlatformDefaultWidth = false, so we stretch the dialog's window to MATCH_PARENT ourselves.
+ */
+@Composable
+fun JackFullScreenDialog(
+    onDismissRequest: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnClickOutside = false
+        )
+    ) {
+        val window = (androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+        androidx.compose.runtime.SideEffect {
+            window?.let {
+                it.setLayout(
+                    android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                    android.view.WindowManager.LayoutParams.MATCH_PARENT
+                )
+                it.setDimAmount(0f)
+            }
+        }
+        Box(modifier = Modifier.fillMaxSize()) { content() }
+    }
+}

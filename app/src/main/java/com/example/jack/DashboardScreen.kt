@@ -166,68 +166,90 @@ fun ESP32SerialScreen(
             }
         }
 
-        // ---------------- Body ----------------
-        Column(
+        // ---------------- Body: ONE scrolling page ----------------
+        // Clock, check-in panel and counters scroll away; the photo grid flows below them at full size.
+        val people = snapshot?.inBuilding.orEmpty()
+        val fullWidth: androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope.() -> androidx.compose.foundation.lazy.grid.GridItemSpan =
+            { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }
+
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 150.dp),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .weight(1f)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .fillMaxWidth()
         ) {
-            ClockHeader()
+            item(span = fullWidth) { ClockHeader() }
 
             // Main action: check in / out
-            Surface(
-                color = JackColors.Ink,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = JackColors.Blue, modifier = Modifier.size(28.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text("WORKSHOP ATTENDANCE", style = MaterialTheme.typography.headlineSmall, color = JackColors.Paper)
+            item(span = fullWidth) {
+                Surface(
+                    color = JackColors.Ink,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = JackColors.Blue, modifier = Modifier.size(28.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text("WORKSHOP ATTENDANCE", style = MaterialTheme.typography.headlineSmall, color = JackColors.Paper)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Enter your ID, then take a selfie to check in or out.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = JackColors.Line
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        JackPrimaryButton(
+                            text = "Check in / out",
+                            onClick = onMarkAttendance,
+                            icon = Icons.Default.CameraAlt,
+                            height = 64.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Shortcut: press VOLUME UP",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = JackColors.Gray,
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        )
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Enter your ID, then take a selfie to check in or out.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = JackColors.Line
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    JackPrimaryButton(
-                        text = "Check in / out",
-                        onClick = onMarkAttendance,
-                        icon = Icons.Default.CameraAlt,
-                        height = 64.dp,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Shortcut: press VOLUME UP",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = JackColors.Gray,
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    )
                 }
             }
 
             // Live numbers
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatTile(
-                    label = "In the building",
-                    value = snapshot?.inBuilding?.size?.toString() ?: "–",
-                    valueColor = JackColors.Green,
-                    modifier = Modifier.weight(1f)
-                )
-                StatTile(
-                    label = "Visits today",
-                    value = snapshot?.visitsToday?.toString() ?: "–",
-                    modifier = Modifier.weight(1f)
-                )
+            item(span = fullWidth) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatTile(
+                        label = "In the building",
+                        value = snapshot?.inBuilding?.size?.toString() ?: "–",
+                        valueColor = JackColors.Green,
+                        modifier = Modifier.weight(1f)
+                    )
+                    StatTile(
+                        label = "Visits today",
+                        value = snapshot?.visitsToday?.toString() ?: "–",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
-            // Who is in the building (fills the rest of the screen)
-            WhoIsInTheBuildingCard(snapshot = snapshot, modifier = Modifier.weight(1f))
+            // Who is in the building
+            item(span = fullWidth) {
+                Box(modifier = Modifier.padding(top = 8.dp)) { RosterHeader(count = people.size) }
+            }
+            if (snapshot != null && people.isEmpty()) {
+                item(span = fullWidth) { RosterEmptyState() }
+            } else {
+                items(people.size, key = { people[it].first.id }) { index ->
+                    val (record, user) = people[index]
+                    PersonTile(record, user)
+                }
+            }
         }
     }
 }

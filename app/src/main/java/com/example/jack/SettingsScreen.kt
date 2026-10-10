@@ -50,6 +50,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
@@ -72,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -97,8 +99,84 @@ import java.io.IOException
 import java.nio.charset.Charset
 import java.util.UUID
 
-// Settings dialog and its sections (battery, service, kiosk, export & sync, users, PIN, reset).
+// v3.1 — Settings as a full-screen page, grouped:
+// ESP32 & Power · Attendance & Sync · Users · Alerts · Security · Device · Danger zone.
 
+// =================================================================================================
+// Settings building blocks
+// =================================================================================================
+
+/** One group of settings: a section label above a white card. */
+@Composable
+private fun SettingsGroup(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = JackColors.Ink, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            SectionLabel(text = title)
+        }
+        JackCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), content = content)
+        }
+    }
+}
+
+/** A row inside a group: title, optional explanation, optional control on the right. */
+@Composable
+private fun SettingRow(
+    title: String,
+    subtitle: String? = null,
+    titleColor: Color = JackColors.Ink,
+    trailing: @Composable (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = titleColor)
+            if (subtitle != null) Text(subtitle, style = HintStyle)
+        }
+        if (trailing != null) {
+            Spacer(Modifier.width(12.dp))
+            trailing()
+        }
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, subtitle: String?, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    SettingRow(title, subtitle) {
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = JackColors.Paper,
+                checkedTrackColor = JackColors.Blue,
+                uncheckedThumbColor = JackColors.Gray,
+                uncheckedTrackColor = JackColors.Panel,
+                uncheckedBorderColor = JackColors.Line
+            )
+        )
+    }
+}
+
+@Composable
+private fun RowDivider() = HorizontalDivider(color = JackColors.Line, thickness = 1.dp)
+
+/** Label/value pair for the diagnostics list. */
+@Composable
+private fun InfoLine(label: String, value: String, valueColor: Color = JackColors.Ink) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = JackColors.Graphite, modifier = Modifier.weight(1f))
+        Text(value, style = MaterialTheme.typography.labelMedium, color = valueColor)
+    }
+}
+
+/** − value + stepper for the battery thresholds. */
 @Composable
 fun NumberStepper(
     label: String,
@@ -108,75 +186,113 @@ fun NumberStepper(
     badgeColor: Color,
     onValueChange: (Int) -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Text(sublabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            IconButton(
+    SettingRow(title = label, subtitle = sublabel) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedIconButton(
                 onClick = { if (value > range.first) onValueChange(value - 1) },
-                modifier = Modifier.size(36.dp)
+                shape = MaterialTheme.shapes.small,
+                border = BorderStroke(1.dp, JackColors.Line),
+                modifier = Modifier.size(40.dp)
+            ) { Icon(Icons.Default.Remove, contentDescription = "Decrease") }
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.widthIn(min = 64.dp)
             ) {
-                Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                Text("$value%", style = MaterialTheme.typography.titleMedium, color = badgeColor)
             }
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = badgeColor.copy(alpha = 0.15f),
-                modifier = Modifier.widthIn(min = 52.dp)
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = "$value%",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = badgeColor
-                    )
-                }
-            }
-            IconButton(
+            OutlinedIconButton(
                 onClick = { if (value < range.last) onValueChange(value + 1) },
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Increase")
+                shape = MaterialTheme.shapes.small,
+                border = BorderStroke(1.dp, JackColors.Line),
+                modifier = Modifier.size(40.dp)
+            ) { Icon(Icons.Default.Add, contentDescription = "Increase") }
+        }
+    }
+}
+
+// =================================================================================================
+// The Settings page
+// =================================================================================================
+
+/**
+ * Full-screen Settings (admin only). Name kept as SettingsDialog so the admin-lock wiring in
+ * MainActivity is unchanged; it now fills the screen like a normal page.
+ */
+@Composable
+fun SettingsDialog(
+    context: Context,
+    onDismiss: () -> Unit,
+    onOpenConnection: () -> Unit = {},
+    onOpenAlerts: () -> Unit = {}
+) {
+    JackFullScreenDialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .adminActivity(),
+            color = JackColors.Concrete
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                SettingsTopBar(onBack = onDismiss)
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    item { Esp32AndPowerGroup(context, onOpenConnection) }
+                    item { AttendanceExportSyncCard(context) }
+                    item { UsersGroup(context) }
+                    item { AlertsGroup(onOpenAlerts) }
+                    item { SecurityGroup(context) }
+                    item { DeviceGroup(context) }
+                    item { DangerZoneGroup(context) }
+                    item {
+                        Text(
+                            "Triple Dimension · Jack v${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = JackColors.Gray,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun SettingsDialog(
-    context: Context,
-    onDismiss: () -> Unit
-) {
-    val activity = context as? ComponentActivity
-    val prefs = remember { context.getSharedPreferences("esp32_prefs", Context.MODE_PRIVATE) }
+private fun SettingsTopBar(onBack: () -> Unit) {
+    Surface(color = JackColors.Paper) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                JackIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("SETTINGS", style = MaterialTheme.typography.headlineSmall.copy(letterSpacing = 1.sp), color = JackColors.Ink)
+                    Text("ADMIN · LOCKS WHEN CLOSED", style = MaterialTheme.typography.labelSmall, color = JackColors.Graphite)
+                }
+                // App version — bumped on every upgrade so the installed build is easy to confirm.
+                StatusChip("v${BuildConfig.VERSION_NAME}", JackColors.Ink, filled = true)
+            }
+            StripeBar()
+        }
+    }
+}
 
+// ---------------- ESP32 & Power ----------------
+@Composable
+private fun Esp32AndPowerGroup(context: Context, onOpenConnection: () -> Unit) {
+    val prefs = remember { context.getSharedPreferences(JackCore.PREF_NAME, Context.MODE_PRIVATE) }
     var minBattery by remember { mutableStateOf(prefs.getInt("pref_min_battery", 20)) }
     var maxBattery by remember { mutableStateOf(prefs.getInt("pref_max_battery", 80)) }
 
-    val isKioskActive = remember {
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        am.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
-    }
-    var kioskEnabled by remember { mutableStateOf(isKioskActive) }
-    var bgServiceEnabled by remember { mutableStateOf(Esp32BackgroundService.isRunning) }
-
-    val batteryStatus = remember {
-        IntentFilter(Intent.ACTION_BATTERY_CHANGED).let { filter ->
-            context.registerReceiver(null, filter)
-        }
-    }
+    val batteryStatus = remember { context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) }
     val batteryLevel = batteryStatus?.let {
         val level = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = it.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
@@ -187,490 +303,349 @@ fun SettingsDialog(
         status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
     } ?: false
 
-    AlertDialog(
-        onDismissRequest = {
-            prefs.edit().putInt("pref_min_battery", minBattery).putInt("pref_max_battery", maxBattery).apply()
-            onDismiss()
-        },
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text("Jack Settings", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.weight(1f))
-                // App version — bumped on every upgrade so the installed build is easy to confirm.
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    Text(
-                        text = "v${BuildConfig.VERSION_NAME}",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-        },
-        text = {
-            LazyColumn(
-                modifier = Modifier.adminActivity()
-                    .fillMaxWidth()
-                    .height(400.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                item {
-                    // Section 1: Battery & Charge/Discharge Automation
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("1. Auto-Charge & Discharge", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer
-                                ) {
-                                    Text(
-                                        text = if (batteryLevel >= 0) "$batteryLevel% ${if (isCharging) "⚡" else "🔋"}" else "--%",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
+    val status = JackCore.connectionStatus.value
+    val statusColor = when (status) {
+        ConnectionState.CONNECTED -> JackColors.Green
+        ConnectionState.DISCONNECTED -> JackColors.Red
+        else -> JackColors.Amber
+    }
 
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            NumberStepper(
-                                label = "Min Charge Threshold",
-                                sublabel = "Sends 'CHARGE'",
-                                value = minBattery,
-                                range = 5..49,
-                                badgeColor = MaterialTheme.colorScheme.primary,
-                                onValueChange = { if (it < maxBattery) minBattery = it }
-                            )
-
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-                            NumberStepper(
-                                label = "Max Discharge Threshold",
-                                sublabel = "Sends 'DISCHARGE'",
-                                value = maxBattery,
-                                range = 51..100,
-                                badgeColor = MaterialTheme.colorScheme.error,
-                                onValueChange = { if (it > minBattery) maxBattery = it }
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    // Section 2: Permissions
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("2. Required Permissions", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Bluetooth Scan, Connect & USB Host", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = {
-                                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                        data = Uri.fromParts("package", context.packageName, null)
-                                    }
-                                    context.startActivity(intent)
-                                },
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("Open App Settings")
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    // Section 3: Background Service & Notifications
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("3. Notifications & 24/7 Running", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("24/7 Background Service", style = MaterialTheme.typography.bodyMedium)
-                                Switch(
-                                    checked = bgServiceEnabled,
-                                    onCheckedChange = { enabled ->
-                                        bgServiceEnabled = enabled
-                                        if (enabled) {
-                                            Esp32BackgroundService.startService(context)
-                                        } else {
-                                            Esp32BackgroundService.stopService(context)
-                                        }
-                                    }
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                            data = Uri.parse("package:${context.packageName}")
-                                        }
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {}
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Disable Battery Optimization (Prevent App Closing)")
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    // Section 4: Kiosk Mode
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("4. Kiosk Mode (Screen Pinning)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Lock Task Mode", style = MaterialTheme.typography.bodyMedium)
-                                    Text("Locks app to screen until deactivated", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Switch(
-                                    checked = kioskEnabled,
-                                    onCheckedChange = { enabled ->
-                                        kioskEnabled = enabled
-                                        try {
-                                            if (enabled) {
-                                                activity?.startLockTask()
-                                            } else {
-                                                activity?.stopLockTask()
-                                            }
-                                        } catch (_: Exception) {}
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    // Section 5: Attendance export (daily CSV) & Google Sheets sync
-                    AttendanceExportSyncCard(context)
-                }
-
-                item {
-                    // Section 6: Hardware Shortcut Keys
-                    var shortcutsEnabled by remember { mutableStateOf(prefs.getBoolean("pref_hardware_shortcuts", true)) }
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("6. Hardware Shortcut Keys", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFF4CAF50).copy(alpha = 0.15f),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(modifier = Modifier.padding(8.dp)) {
-                                        Text("Vol Up 🟢", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
-                                        Text("Attendance", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFF2196F3).copy(alpha = 0.15f),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(modifier = Modifier.padding(8.dp)) {
-                                        Text("Vol Down 🔵", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFF2196F3))
-                                        Text("Ping ESP32 • Camera shutter", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Enable Volume Shortcuts", style = MaterialTheme.typography.bodyMedium)
-                                Switch(
-                                    checked = shortcutsEnabled,
-                                    onCheckedChange = { enabled ->
-                                        shortcutsEnabled = enabled
-                                        prefs.edit().putBoolean("pref_hardware_shortcuts", enabled).apply()
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    // Section 7: Device Status & Operator Diagnostics
-                    val kioskMgr = remember { KioskManager(context) }
-                    val isOwner = kioskMgr.isDeviceOwner
-                    val isLocked = kioskMgr.isLockTaskActive
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("7. Device Status & Diagnostics", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text("Device Owner: ${if (isOwner) "YES" else "NO"}", style = MaterialTheme.typography.bodySmall)
-                            Text("Lock Task Mode: ${if (isLocked) "ACTIVE" else "INACTIVE"}", style = MaterialTheme.typography.bodySmall)
-                            Text("Package: ${context.packageName}", style = MaterialTheme.typography.bodySmall)
-                            Text("App Version: ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                            Text("Android SDK: ${Build.VERSION.SDK_INT}", style = MaterialTheme.typography.bodySmall)
-                            Text("Foreground Service: ${if (Esp32BackgroundService.isRunning) "RUNNING" else "STOPPED"}", style = MaterialTheme.typography.bodySmall)
-                            Text("Boot Receiver: REGISTERED", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-
-                item {
-                    // Section 8: Users, Workers & Subscribers Management
-                    val db = remember { AttendanceDatabase.get(context) }
-                    var userCount by remember { mutableStateOf(db.getAllUsers().size) }
-                    var showUserManagementDialog by remember { mutableStateOf(false) }
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("8. Users, Workers & Subscribers", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Registered users: $userCount", style = MaterialTheme.typography.bodyMedium)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = { showUserManagementDialog = true },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Manage Users & Subscribers")
-                            }
-                        }
-                    }
-
-                    if (showUserManagementDialog) {
-                        UserManagementDialog(
-                            context = context,
-                            onDismiss = {
-                                userCount = db.getAllUsers().size
-                                showUserManagementDialog = false
-                            }
-                        )
-                    }
-                }
-
-                item {
-                    // Section 9: Admin PIN & security
-                    var showChangePin by remember { mutableStateOf(false) }
-                    var pinStatus by remember { mutableStateOf<String?>(null) }
-                    val usingDefault = remember(pinStatus) { AdminSession.isDefaultPin(context) }
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("9. Admin PIN & Security", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                if (usingDefault) "⚠️ Still using the default PIN (1234). Please change it." else "✅ Custom PIN set.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (usingDefault) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "Admin screens lock when closed, or after 2 minutes without use.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            pinStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold) }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = { showChangePin = true },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Change Admin PIN")
-                            }
-                        }
-                    }
-
-                    if (showChangePin) {
-                        ChangePinDialog(
-                            context = context,
-                            onChanged = {
-                                showChangePin = false
-                                pinStatus = "✅ Admin PIN changed."
-                                JackCore.addLog("🔑 Admin PIN changed.")
-                            },
-                            onDismiss = { showChangePin = false }
-                        )
-                    }
-                }
-
-                item {
-                    // Section 10: Test & Reset Utilities
-                    val db = remember { AttendanceDatabase.get(context) }
-                    var clearStatus by remember { mutableStateOf<String?>(null) }
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("10. Test & Reset Utilities", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        db.clearAttendance()
-                                        clearStatus = "Attendance records cleared!"
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Clear Attendance", color = MaterialTheme.colorScheme.error)
-                                }
-                                Button(
-                                    onClick = {
-                                        db.clearAttendance()
-                                        db.writableDatabase.execSQL("DELETE FROM users")
-                                        prefs.edit().clear().apply()
-                                        clearStatus = "App reset! Restarting..."
-                                        android.os.Handler(context.mainLooper).postDelayed({
-                                            val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                                            }
-                                            if (intent != null) context.startActivity(intent)
-                                        }, 1000)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Reset App")
-                                }
-                            }
-                            if (clearStatus != null) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = clearStatus!!,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (BuildConfig.DEBUG) {
-                    item {
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text("🛠️ Developer Tools", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text("Temporarily exit Lock Task mode without losing Device Owner status.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(
-                                    onClick = {
-                                        val km = KioskManager(context)
-                                        if (activity != null) {
-                                            km.stopLockTask(activity)
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Exit Kiosk Mode (Stop Lock Task)")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    prefs.edit().putInt("pref_min_battery", minBattery).putInt("pref_max_battery", maxBattery).apply()
-                    onDismiss()
-                },
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("Save & Close")
-            }
+    SettingsGroup("ESP32 & Power", Icons.Default.Power) {
+        SettingRow(
+            title = "ESP32 connection",
+            subtitle = "${JackCore.deviceName.value} · ${if (JackCore.transportMode.value == TransportMode.BLE) "Bluetooth" else "USB"}"
+        ) {
+            StatusChip(status.name, statusColor, filled = status == ConnectionState.CONNECTED)
         }
-    )
+        JackOutlineButton(
+            text = "Connection options",
+            onClick = onOpenConnection,
+            icon = Icons.Default.Power,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+        )
+        RowDivider()
+        SettingRow(
+            title = "Tablet battery",
+            subtitle = "Jack tells the ESP32 to switch the charger on and off."
+        ) {
+            StatusChip(
+                if (batteryLevel >= 0) "$batteryLevel%${if (isCharging) " · charging" else ""}" else "--%",
+                if (isCharging) JackColors.Green else JackColors.Ink
+            )
+        }
+        NumberStepper(
+            label = "Start charging at",
+            sublabel = "Sends CHARGE",
+            value = minBattery,
+            range = 5..49,
+            badgeColor = JackColors.Ink,
+            onValueChange = {
+                if (it < maxBattery) {
+                    minBattery = it
+                    prefs.edit().putInt("pref_min_battery", it).apply()   // saved immediately
+                }
+            }
+        )
+        RowDivider()
+        NumberStepper(
+            label = "Stop charging at",
+            sublabel = "Sends DISCHARGE",
+            value = maxBattery,
+            range = 51..100,
+            badgeColor = JackColors.Blue,
+            onValueChange = {
+                if (it > minBattery) {
+                    maxBattery = it
+                    prefs.edit().putInt("pref_max_battery", it).apply()
+                }
+            }
+        )
+    }
 }
 
+// ---------------- Users ----------------
+@Composable
+private fun UsersGroup(context: Context) {
+    val db = remember { AttendanceDatabase.get(context) }
+    var userCount by remember { mutableStateOf(db.getAllUsers().size) }
+    var showUserManagementDialog by remember { mutableStateOf(false) }
+
+    SettingsGroup("Users", Icons.Default.People) {
+        SettingRow(
+            title = "Workers & subscribers",
+            subtitle = "People who can check in with an Attendee ID."
+        ) {
+            Text("$userCount", style = MaterialTheme.typography.headlineSmall, color = JackColors.Ink)
+        }
+        JackOutlineButton(
+            text = "Manage users",
+            onClick = { showUserManagementDialog = true },
+            icon = Icons.Default.PersonAdd,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        )
+    }
+
+    if (showUserManagementDialog) {
+        UserManagementDialog(
+            context = context,
+            onDismiss = {
+                userCount = db.getAllUsers().size
+                showUserManagementDialog = false
+            }
+        )
+    }
+}
+
+// ---------------- Alerts ----------------
+@Composable
+private fun AlertsGroup(onOpenAlerts: () -> Unit) {
+    val count = JackCore.alertRules.size
+    SettingsGroup("Alerts", Icons.Default.Notifications) {
+        SettingRow(
+            title = "Alert rules",
+            subtitle = "Play a sound when an ESP32 message contains a trigger phrase."
+        ) {
+            Text("$count", style = MaterialTheme.typography.headlineSmall, color = JackColors.Ink)
+        }
+        JackOutlineButton(
+            text = "Manage alerts",
+            onClick = onOpenAlerts,
+            icon = Icons.Default.Notifications,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        )
+    }
+}
+
+// ---------------- Security ----------------
+@Composable
+private fun SecurityGroup(context: Context) {
+    var showChangePin by remember { mutableStateOf(false) }
+    var pinStatus by remember { mutableStateOf<String?>(null) }
+    val usingDefault = remember(pinStatus) { AdminSession.isDefaultPin(context) }
+
+    SettingsGroup("Security", Icons.Default.Lock) {
+        SettingRow(
+            title = "Admin PIN",
+            subtitle = pinStatus ?: if (usingDefault) "Still the default (1234) — please change it." else "Custom PIN set.",
+            titleColor = JackColors.Ink
+        ) {
+            if (usingDefault) StatusChip("Default", JackColors.Red) else StatusChip("Set", JackColors.Green)
+        }
+        JackOutlineButton(
+            text = "Change admin PIN",
+            onClick = { showChangePin = true },
+            icon = Icons.Default.Lock,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            "Admin screens lock when closed, or after 2 minutes without use.",
+            style = HintStyle,
+            modifier = Modifier.padding(vertical = 10.dp)
+        )
+    }
+
+    if (showChangePin) {
+        ChangePinDialog(
+            context = context,
+            onChanged = {
+                showChangePin = false
+                pinStatus = "Admin PIN changed."
+                JackCore.addLog("🔑 Admin PIN changed.")
+            },
+            onDismiss = { showChangePin = false }
+        )
+    }
+}
+
+// ---------------- Device ----------------
+@Composable
+private fun DeviceGroup(context: Context) {
+    val activity = context as? ComponentActivity
+    val prefs = remember { context.getSharedPreferences(JackCore.PREF_NAME, Context.MODE_PRIVATE) }
+    var bgServiceEnabled by remember { mutableStateOf(Esp32BackgroundService.isRunning) }
+    var shortcutsEnabled by remember { mutableStateOf(prefs.getBoolean("pref_hardware_shortcuts", true)) }
+    val kioskMgr = remember { KioskManager(context) }
+    var kioskEnabled by remember { mutableStateOf(kioskMgr.isLockTaskActive) }
+
+    SettingsGroup("Device", Icons.Default.Settings) {
+        SettingSwitch(
+            title = "24/7 background service",
+            subtitle = "Keeps the ESP32 connected when the screen is closed.",
+            checked = bgServiceEnabled
+        ) { enabled ->
+            bgServiceEnabled = enabled
+            if (enabled) Esp32BackgroundService.startService(context) else Esp32BackgroundService.stopService(context)
+        }
+        RowDivider()
+        SettingSwitch(
+            title = "Volume shortcuts",
+            subtitle = "Vol Up: check in/out · Vol Down: ping ESP32 / camera shutter",
+            checked = shortcutsEnabled
+        ) { enabled ->
+            shortcutsEnabled = enabled
+            prefs.edit().putBoolean("pref_hardware_shortcuts", enabled).apply()
+        }
+        RowDivider()
+        SettingSwitch(
+            title = "Kiosk lock (Lock Task)",
+            subtitle = "Pins Jack to the screen until switched off.",
+            checked = kioskEnabled
+        ) { enabled ->
+            kioskEnabled = enabled
+            try {
+                if (enabled) activity?.startLockTask() else activity?.stopLockTask()
+            } catch (_: Exception) {}
+        }
+        RowDivider()
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            JackOutlineButton(
+                text = "App permissions",
+                onClick = {
+                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                    })
+                },
+                modifier = Modifier.weight(1f)
+            )
+            JackOutlineButton(
+                text = "Battery optimisation",
+                onClick = {
+                    try {
+                        context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        })
+                    } catch (_: Exception) {}
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        RowDivider()
+        // Diagnostics
+        Column(modifier = Modifier.padding(vertical = 10.dp)) {
+            Text("DIAGNOSTICS", style = MaterialTheme.typography.labelMedium, color = JackColors.Ink)
+            Spacer(Modifier.height(4.dp))
+            InfoLine("App version", "${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
+            InfoLine("Device owner", if (kioskMgr.isDeviceOwner) "YES" else "NO")
+            InfoLine("Lock Task", if (kioskMgr.isLockTaskActive) "ACTIVE" else "INACTIVE")
+            InfoLine(
+                "Background service",
+                if (Esp32BackgroundService.isRunning) "RUNNING" else "STOPPED",
+                if (Esp32BackgroundService.isRunning) JackColors.Green else JackColors.Red
+            )
+            InfoLine("Android", "${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+            InfoLine("Package", context.packageName)
+        }
+    }
+}
+
+// ---------------- Danger zone ----------------
+@Composable
+private fun DangerZoneGroup(context: Context) {
+    val activity = context as? ComponentActivity
+    val db = remember { AttendanceDatabase.get(context) }
+    var clearStatus by remember { mutableStateOf<String?>(null) }
+    var confirm by remember { mutableStateOf<String?>(null) }   // "clear" or "reset"
+
+    SettingsGroup("Danger zone", Icons.Default.Delete) {
+        Text(
+            "These can't be undone. The daily CSV files and Google Sheet are not affected.",
+            style = HintStyle,
+            modifier = Modifier.padding(top = 10.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            JackOutlineButton(
+                text = "Clear attendance",
+                onClick = { confirm = "clear" },
+                color = JackColors.Red,
+                modifier = Modifier.weight(1f)
+            )
+            JackOutlineButton(
+                text = "Reset app",
+                onClick = { confirm = "reset" },
+                color = JackColors.Red,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        clearStatus?.let {
+            Text(it, style = MaterialTheme.typography.labelMedium, color = JackColors.Red, modifier = Modifier.padding(bottom = 10.dp))
+        }
+        if (BuildConfig.DEBUG) {
+            RowDivider()
+            SettingRow(title = "Developer: exit kiosk", subtitle = "Debug builds only. Keeps device-owner status.") {
+                JackOutlineButton(
+                    text = "Exit",
+                    onClick = { if (activity != null) KioskManager(context).stopLockTask(activity) },
+                    color = JackColors.Red
+                )
+            }
+        }
+    }
+
+    // Confirmation before anything destructive (previously these ran on a single tap).
+    confirm?.let { what ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            containerColor = JackColors.Paper,
+            shape = MaterialTheme.shapes.medium,
+            title = {
+                Text(
+                    if (what == "clear") "CLEAR ALL ATTENDANCE?" else "RESET THE APP?",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = JackColors.Red
+                )
+            },
+            text = {
+                Text(
+                    if (what == "clear") {
+                        "Deletes every check-in and check-out stored on this tablet. Users, alerts and settings are kept."
+                    } else {
+                        "Deletes all attendance, all users and every setting (including the admin PIN, which goes back to 1234). Jack restarts afterwards."
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                JackPrimaryButton(
+                    text = if (what == "clear") "Clear" else "Reset",
+                    color = JackColors.Red,
+                    height = 48.dp,
+                    onClick = {
+                        confirm = null
+                        if (what == "clear") {
+                            db.clearAttendance()
+                            clearStatus = "Attendance records cleared."
+                        } else {
+                            db.clearAttendance()
+                            db.writableDatabase.execSQL("DELETE FROM users")
+                            context.getSharedPreferences(JackCore.PREF_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+                            clearStatus = "App reset. Restarting…"
+                            android.os.Handler(context.mainLooper).postDelayed({
+                                val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                }
+                                if (intent != null) context.startActivity(intent)
+                            }, 1000)
+                        }
+                    }
+                )
+            },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("CANCEL", style = MaterialTheme.typography.labelLarge, color = JackColors.Ink) } }
+        )
+    }
+}
+
+// =================================================================================================
+// Attendance & Sync group (daily CSV + Google Sheets)
+// =================================================================================================
+
 /**
- * Settings section 5: daily CSV files on the tablet + Google Sheets sync.
+ * Daily CSV files on the tablet + Google Sheets sync.
  * (Workshop management app integration is planned for later.)
  */
 @Composable
@@ -690,131 +665,126 @@ fun AttendanceExportSyncCard(context: Context) {
     val unsynced by AttendanceSync.unsyncedCount
 
     fun currentConfig() = AttendanceSync.SheetsConfig(sheetsEnabled, sheetsUrl.trim(), sheetsSecret.trim())
+    fun today() = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
 
     // Android 9 and older need storage permission to save into the public Documents folder.
     val storagePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ ->
-        scope.launch { AttendanceSync.exportDay(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())) }
+        scope.launch { AttendanceSync.exportDay(today()) }
     }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("5. Attendance Export & Sync", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = JackColors.Blue,
+        unfocusedBorderColor = JackColors.Line,
+        focusedLabelColor = JackColors.Blue,
+        cursorColor = JackColors.Blue
+    )
 
-            // ---- Daily file ----
-            Text("📁 Daily file (automatic)", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-            Text(
-                "Saved to Documents/Jack/attendance_<date>.csv and updated after every check-in/out.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(exportStatus, style = MaterialTheme.typography.bodySmall)
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { showLogsDialog = true },
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) { Text("View Logs") }
-                Button(
-                    onClick = {
-                        if (!AttendanceSync.hasLegacyWritePermission()) {
-                            storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                        } else {
-                            scope.launch {
-                                AttendanceSync.exportDay(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()))
-                            }
-                        }
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) { Text("Export Today") }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-            // ---- Google Sheets ----
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("☁️ Google Sheets sync", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                Switch(
-                    checked = sheetsEnabled,
-                    onCheckedChange = {
-                        sheetsEnabled = it
-                        AttendanceSync.saveSheetsConfig(context, currentConfig())
+    SettingsGroup("Attendance & Sync", Icons.Default.CheckCircle) {
+        // ---- Daily file ----
+        SettingRow(
+            title = "Daily file (automatic)",
+            subtitle = "Documents/Jack/attendance_<date>.csv — updated after every check-in/out."
+        )
+        Text(exportStatus, style = MaterialTheme.typography.labelMedium, color = JackColors.Graphite)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            JackOutlineButton(text = "View logs", onClick = { showLogsDialog = true }, modifier = Modifier.weight(1f))
+            JackOutlineButton(
+                text = "Export today",
+                onClick = {
+                    if (!AttendanceSync.hasLegacyWritePermission()) {
+                        storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    } else {
+                        scope.launch { AttendanceSync.exportDay(today()) }
                     }
-                )
-            }
-            Text(
-                "Paste the Apps Script web app URL and the secret from your sheet's script (see GOOGLE_SHEETS_SETUP.md).",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            OutlinedTextField(
-                value = sheetsUrl,
-                onValueChange = { sheetsUrl = it },
-                label = { Text("Web app URL") },
-                placeholder = { Text("https://script.google.com/macros/s/…/exec") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = sheetsSecret,
-                onValueChange = { sheetsSecret = it },
-                label = { Text("Secret") },
-                singleLine = true,
-                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Text("Waiting to sync: $unsynced visit(s)", style = MaterialTheme.typography.bodySmall)
-            Text(syncStatus, style = MaterialTheme.typography.bodySmall)
-            testResult?.let { Text(it, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold) }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    enabled = !busy,
-                    onClick = {
-                        AttendanceSync.saveSheetsConfig(context, currentConfig())
-                        busy = true
-                        testResult = "Testing…"
-                        scope.launch {
-                            testResult = AttendanceSync.testSheetsConnection(currentConfig())
-                            busy = false
-                        }
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) { Text("Save & Test") }
-                Button(
-                    enabled = !busy && sheetsEnabled,
-                    onClick = {
-                        AttendanceSync.saveSheetsConfig(context, currentConfig())
-                        busy = true
-                        testResult = null
-                        scope.launch {
-                            AttendanceSync.syncToSheets(manual = true)
-                            busy = false
-                        }
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) { Text("Sync Now") }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-            Text(
-                "🏭 Workshop management app — live \"Who is in the Building\" feed: coming later.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.weight(1f)
             )
         }
+        RowDivider()
+
+        // ---- Google Sheets ----
+        SettingSwitch(
+            title = "Google Sheets sync",
+            subtitle = "Paste the Apps Script URL and secret (see GOOGLE_SHEETS_SETUP.md).",
+            checked = sheetsEnabled
+        ) {
+            sheetsEnabled = it
+            AttendanceSync.saveSheetsConfig(context, currentConfig())
+        }
+        OutlinedTextField(
+            value = sheetsUrl,
+            onValueChange = { sheetsUrl = it },
+            label = { Text("Web app URL") },
+            placeholder = { Text("https://script.google.com/macros/s/…/exec") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.small,
+            colors = fieldColors,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = sheetsSecret,
+            onValueChange = { sheetsSecret = it },
+            label = { Text("Secret") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.small,
+            colors = fieldColors,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("WAITING TO SYNC", style = MaterialTheme.typography.labelSmall, color = JackColors.Graphite, modifier = Modifier.weight(1f))
+            StatusChip("$unsynced visit(s)", if (unsynced > 0) JackColors.Amber else JackColors.Green)
+        }
+        Text(syncStatus, style = MaterialTheme.typography.labelMedium, color = JackColors.Graphite, modifier = Modifier.padding(top = 4.dp))
+        testResult?.let {
+            Text(it, style = MaterialTheme.typography.labelMedium, color = if (it.startsWith("✅")) JackColors.Green else JackColors.Red)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            JackOutlineButton(
+                text = "Save & test",
+                enabled = !busy,
+                onClick = {
+                    AttendanceSync.saveSheetsConfig(context, currentConfig())
+                    busy = true
+                    testResult = "Testing…"
+                    scope.launch {
+                        testResult = AttendanceSync.testSheetsConnection(currentConfig())
+                        busy = false
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            )
+            JackPrimaryButton(
+                text = "Sync now",
+                enabled = !busy && sheetsEnabled,
+                height = 48.dp,
+                onClick = {
+                    AttendanceSync.saveSheetsConfig(context, currentConfig())
+                    busy = true
+                    testResult = null
+                    scope.launch {
+                        AttendanceSync.syncToSheets(manual = true)
+                        busy = false
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
+        RowDivider()
+        SettingRow(
+            title = "Workshop management app",
+            subtitle = "Live \"Who is in the Building\" feed — coming later."
+        ) { StatusChip("Planned", JackColors.Gray) }
     }
 
     if (showLogsDialog) {
