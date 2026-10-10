@@ -12,7 +12,9 @@ class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            Log.d(TAG, "BOOT_COMPLETED received. Launching MainActivity...")
+            Log.d(TAG, "BOOT_COMPLETED received. Starting background service and MainActivity...")
+            // Start the 24/7 service first so the ESP32 connection comes up even if the screen launch is blocked.
+            Esp32BackgroundService.startService(context)
             val launchIntent = Intent(context, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }

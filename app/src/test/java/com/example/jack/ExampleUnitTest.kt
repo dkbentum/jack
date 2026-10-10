@@ -1,17 +1,5 @@
 package com.example.jack
 
-import org.junit.Test
-
-import org.junit.Assert.*
-
-/**
- * Example local unit test, which will execute on the development machine (host).
- *
- * See [testing documentation](http://d.android.com/tools/testing).
- */
-class ExampleUnitTest {
-    @Test
-    fun addition_isCorrect() {
-        assertEquals(4, 2 + 2)
-    }
-}
+// Android Studio's template test (2 + 2 = 4) was removed in v2.5.
+// Real unit tests: LineAssemblerTest, AlertMatcherTest, AttendanceCsvTest, AdminPinPolicyTest, UserIdRulesTest.
+// This file is now empty and safe to delete.

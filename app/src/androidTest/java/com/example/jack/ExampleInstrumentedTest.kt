@@ -1,24 +1,5 @@
 package com.example.jack
 
-import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.ext.junit.runners.AndroidJUnit4
-
-import org.junit.Test
-import org.junit.runner.RunWith
-
-import org.junit.Assert.*
-
-/**
- * Instrumented test, which will execute on an Android device.
- *
- * See [testing documentation](http://d.android.com/tools/testing).
- */
-@RunWith(AndroidJUnit4::class)
-class ExampleInstrumentedTest {
-    @Test
-    fun useAppContext() {
-        // Context of the app under test.
-        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.example.jack", appContext.packageName)
-    }
-}
+// Android Studio's template test was removed in v2.5 (it only checked the package name and
+// would have broken after the planned rename). Real on-device tests: AttendanceDatabaseTest.kt.
+// This file is now empty and safe to delete.
