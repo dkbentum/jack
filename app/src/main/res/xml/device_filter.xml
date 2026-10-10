@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Silicon Labs CP210x (ESP32 NodeMCU, etc.) -->
+    <usb-device vendor-id="4292" />
+    <!-- QinHeng CH340 (ESP32 DevKit, Wemos, etc.) -->
+    <usb-device vendor-id="6790" />
+    <!-- FTDI FT232R -->
+    <usb-device vendor-id="1027" />
+</resources>
