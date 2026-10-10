@@ -16,8 +16,8 @@ android {
         minSdk = 24
         targetSdk = 37
         // Bump both on every upgrade: versionCode +1, versionName +0.1 (shown in Settings).
-        versionCode = 24
-        versionName = "3.5"
+        versionCode = 27
+        versionName = "3.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

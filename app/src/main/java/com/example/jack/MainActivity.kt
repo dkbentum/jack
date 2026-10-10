@@ -452,7 +452,13 @@ class MainActivity : ComponentActivity() {
                         TerminalLogsDialog(
                             logLines = _logLines,
                             onClearLogs = { JackCore.clearLogs() },
-                            onDismiss = { showTerminalDialog = false }
+                            onDismiss = { showTerminalDialog = false },
+                            // v3.7: send test commands to the ESP32 from the terminal
+                            connected = _connectionStatus.value == ConnectionState.CONNECTED,
+                            onSendCommand = { cmd ->
+                                JackCore.sendCommand(cmd)
+                                addLog("📤 Sent: $cmd")
+                            }
                         )
                     }
 

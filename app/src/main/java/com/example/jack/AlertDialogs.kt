@@ -50,6 +50,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
@@ -99,6 +103,10 @@ import java.util.UUID
 
 // User-defined alert rules: list and Add Alert dialog.
 
+/**
+ * v3.8: full-screen ALERTS page. Each rule shows its trigger text and sound, with a
+ * Test-sound button and a delete (with confirmation). Big ADD ALERT button at the bottom.
+ */
 @Composable
 fun AlertsConfigDialog(
     alertRules: List<AlertRule>,
@@ -106,104 +114,209 @@ fun AlertsConfigDialog(
     onDeleteRule: (AlertRule) -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Notifications,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text("Manage Alerts (${alertRules.size})", fontWeight = FontWeight.Bold)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.adminActivity()
-                    .fillMaxWidth()
-                    .heightIn(max = 380.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (alertRules.isEmpty()) {
-                    Text(
-                        text = "No custom alerts configured.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray,
-                        modifier = Modifier.padding(vertical = 16.dp)
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(alertRules) { rule ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+    val context = LocalContext.current
+    var playingId by remember { mutableStateOf<String?>(null) }
+    var ringtone by remember { mutableStateOf<android.media.Ringtone?>(null) }
+    var toDelete by remember { mutableStateOf<AlertRule?>(null) }
+
+    fun stopSound() {
+        try { ringtone?.stop() } catch (_: Exception) {}
+        ringtone = null
+        playingId = null
+    }
+
+    fun toggleSound(rule: AlertRule) {
+        if (playingId == rule.id) { stopSound(); return }
+        stopSound()
+        ringtone = try {
+            RingtoneManager.getRingtone(context, rule.toneUri.toUri())
+                ?: RingtoneManager.getRingtone(context, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+        } catch (_: Exception) { null }
+        try { ringtone?.play(); playingId = rule.id } catch (_: Exception) { ringtone = null }
+    }
+
+    // Stop a test sound when it finishes or when the page closes.
+    LaunchedEffect(playingId) {
+        while (playingId != null) {
+            kotlinx.coroutines.delay(300)
+            if (ringtone?.isPlaying != true) { ringtone = null; playingId = null }
+        }
+    }
+    DisposableEffect(Unit) { onDispose { stopSound() } }
+
+    JackFullScreenDialog(onDismissRequest = onDismiss) {
+        Surface(modifier = Modifier.fillMaxSize().adminActivity(), color = JackColors.Concrete) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // ---------- Top bar ----------
+                Surface(color = JackColors.Paper) {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            JackIconButton(Icons.Default.Close, "Close", onDismiss)
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("ALERTS", style = MaterialTheme.typography.headlineSmall, color = JackColors.Ink)
+                                Text("SOUNDS FOR ESP32 MESSAGES", style = MaterialTheme.typography.labelSmall, color = JackColors.Graphite)
+                            }
+                            StatusChip("${alertRules.size} rules", JackColors.Ink)
+                        }
+                        StripeBar()
+                    }
+                }
+
+                // ---------- Body ----------
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
+                        JackCard(modifier = Modifier.fillMaxWidth(), color = JackColors.BlueTint, borderColor = JackColors.Blue.copy(alpha = 0.4f)) {
+                            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = JackColors.Blue, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    "When a message from the ESP32 contains a rule's trigger text (upper or lower case), Jack plays that rule's sound and marks the line red in the Terminal. Several matches play one after another.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = JackColors.Steel
+                                )
+                            }
+                        }
+                    }
+                    if (alertRules.isNotEmpty()) {
+                        item { SectionLabel("Your alert rules") }
+                    }
+                    if (alertRules.isEmpty()) {
+                        item {
+                            JackCard(modifier = Modifier.fillMaxWidth()) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = rule.name,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "Trigger: \"${rule.triggerText}\"",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { onDeleteRule(rule) },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Delete Rule",
-                                            tint = MaterialTheme.colorScheme.error
-                                        )
-                                    }
+                                    Icon(Icons.Default.Notifications, contentDescription = null, tint = JackColors.Line, modifier = Modifier.size(56.dp))
+                                    Spacer(Modifier.height(10.dp))
+                                    Text("No alerts yet.", style = MaterialTheme.typography.titleSmall, color = JackColors.Graphite)
+                                    Text("Tap ADD ALERT to make your first one.", style = HintStyle)
                                 }
                             }
+                        }
+                    } else {
+                        items(alertRules, key = { it.id }) { rule ->
+                            AlertRuleCard(
+                                rule = rule,
+                                playing = playingId == rule.id,
+                                onTest = { toggleSound(rule) },
+                                onDelete = { toDelete = rule }
+                            )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Button(
-                    onClick = onAddClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add New Alert")
+                // ---------- Action ----------
+                Surface(color = JackColors.Paper, border = BorderStroke(1.dp, JackColors.Line)) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        JackPrimaryButton(
+                            text = "Add alert",
+                            onClick = { stopSound(); onAddClick() },
+                            icon = Icons.Default.Add,
+                            height = 64.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
-        },
-        confirmButton = {
-            Button(onClick = onDismiss, shape = RoundedCornerShape(10.dp)) {
-                Text("Close")
-            }
         }
-    )
+    }
+
+    toDelete?.let { rule ->
+        AlertDialog(
+            onDismissRequest = { toDelete = null },
+            containerColor = JackColors.Paper,
+            shape = MaterialTheme.shapes.medium,
+            title = { Text("DELETE THIS ALERT?", style = MaterialTheme.typography.titleLarge, color = JackColors.Ink) },
+            text = {
+                Text(
+                    "\"${rule.name}\" will stop sounding when the ESP32 sends \"${rule.triggerText}\".",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                JackPrimaryButton(text = "Delete", color = JackColors.Red, height = 48.dp, onClick = {
+                    if (playingId == rule.id) stopSound()
+                    toDelete = null
+                    onDeleteRule(rule)
+                })
+            },
+            dismissButton = { TextButton(onClick = { toDelete = null }) { Text("CANCEL", style = MaterialTheme.typography.labelLarge, color = JackColors.Ink) } }
+        )
+    }
+}
+
+/** One alert rule: bell tile, name, trigger text, sound name, test + delete. */
+@Composable
+private fun AlertRuleCard(rule: AlertRule, playing: Boolean, onTest: () -> Unit, onDelete: () -> Unit) {
+    val context = LocalContext.current
+    val toneName by produceState(initialValue = "…", rule.toneUri) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                RingtoneManager.getRingtone(context, rule.toneUri.toUri())?.getTitle(context) ?: "Default sound"
+            } catch (_: Exception) { "Default sound" }
+        }
+    }
+    JackCard(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(if (playing) JackColors.Blue else JackColors.Ink, MaterialTheme.shapes.small),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Notifications, contentDescription = null, tint = JackColors.Paper)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(rule.name, style = MaterialTheme.typography.titleSmall, color = JackColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("WHEN", style = MaterialTheme.typography.labelSmall, color = JackColors.Gray)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        rule.triggerText,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = JackColors.Ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .background(JackColors.Panel, MaterialTheme.shapes.extraSmall)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = JackColors.Graphite, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(toneName, style = MaterialTheme.typography.labelSmall, color = JackColors.Graphite, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            JackIconButton(
+                icon = if (playing) Icons.Default.Stop else Icons.Default.PlayArrow,
+                contentDescription = if (playing) "Stop sound" else "Test sound",
+                onClick = onTest
+            )
+            Spacer(Modifier.width(8.dp))
+            OutlinedIconButton(
+                onClick = onDelete,
+                shape = MaterialTheme.shapes.small,
+                border = BorderStroke(1.dp, JackColors.Red.copy(alpha = 0.5f)),
+                modifier = Modifier.size(48.dp)
+            ) { Icon(Icons.Default.Delete, contentDescription = "Delete alert", tint = JackColors.Red) }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
