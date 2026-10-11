@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -366,5 +368,51 @@ fun JackFullScreenDialog(
             }
         }
         Box(modifier = Modifier.fillMaxSize()) { content() }
+    }
+}
+
+
+/** What the volume-key shortcut banner says (v3.14). */
+data class ShortcutFeedback(val key: String, val message: String, val color: Color)
+
+/**
+ * v3.14: volume-shortcut banner — a black bar at the bottom with a key-cap ("VOL ▲"), a coloured
+ * edge and a short message. Slides up in and fades out. Pass null to hide it.
+ */
+@Composable
+fun ShortcutBanner(feedback: ShortcutFeedback?, modifier: Modifier = Modifier) {
+    // Keep the last message while the exit animation runs.
+    var last by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(feedback) }
+    if (feedback != null) last = feedback
+    androidx.compose.animation.AnimatedVisibility(
+        visible = feedback != null,
+        enter = androidx.compose.animation.slideInVertically { it } + androidx.compose.animation.fadeIn(),
+        exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { it / 2 },
+        modifier = modifier
+    ) {
+        val f = last ?: return@AnimatedVisibility
+        Surface(
+            color = JackColors.Ink,
+            shape = MaterialTheme.shapes.small,
+            shadowElevation = 8.dp
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(IntrinsicSize.Min)) {
+                Box(Modifier.width(6.dp).fillMaxHeight().background(f.color))
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .border(1.5.dp, JackColors.Paper, MaterialTheme.shapes.extraSmall)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(f.key, style = MaterialTheme.typography.labelLarge, color = JackColors.Paper)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(f.message.uppercase(), style = MaterialTheme.typography.labelLarge, color = JackColors.Paper)
+                }
+            }
+        }
     }
 }

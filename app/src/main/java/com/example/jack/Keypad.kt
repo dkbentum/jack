@@ -1,27 +1,44 @@
 package com.example.jack
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Jack's on-screen keypad (kiosk-friendly: no system keyboard needed).
+ *
+ * v3.13 look: workshop "panel" keys — light grey keys with a firm border, black labels in the
+ * condensed font, a black mode key (ABC / 123), a red CLR and an icon backspace. Keys darken while
+ * pressed and give a short vibration, so taps are felt as well as seen.
  *
  * @param isNumericOnly digits only, no way to switch to letters (PIN entry).
  * @param startInNumberMode letters are available via the "ABC" key, but the pad opens on digits
@@ -57,19 +74,28 @@ fun CustomKeypad(
         isAlphaMode -> alphaRows
         else -> digitRows + listOf(listOf("ABC"))
     }
+    val keyHeight = if (isNumericOnly || !isAlphaMode) 56.dp else 48.dp
+    val gap = if (isAlphaMode) 5.dp else 8.dp
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(gap)
     ) {
         rows.forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(gap)
             ) {
                 row.forEach { label ->
-                    val weight = if (label == " ") 2f else 1f
-                    Button(
+                    val weight = when (label) {
+                        " " -> 3f
+                        "123", "CLR" -> if (isAlphaMode) 1.5f else 1f
+                        else -> 1f
+                    }
+                    KeypadKey(
+                        label = label,
+                        height = keyHeight,
+                        modifier = Modifier.weight(weight),
                         onClick = {
                             when (label) {
                                 "CLR" -> onClear()
@@ -78,32 +104,66 @@ fun CustomKeypad(
                                 "ABC" -> isAlphaMode = true
                                 else -> onCharClick(label)
                             }
-                        },
-                        modifier = Modifier
-                            .weight(weight)
-                            .height(if (isNumericOnly || !isAlphaMode) 48.dp else 44.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = when (label) {
-                                "CLR", "⌫" -> MaterialTheme.colorScheme.errorContainer
-                                "123", "ABC" -> MaterialTheme.colorScheme.tertiaryContainer
-                                else -> MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            contentColor = when (label) {
-                                "CLR", "⌫" -> MaterialTheme.colorScheme.onErrorContainer
-                                "123", "ABC" -> MaterialTheme.colorScheme.onTertiaryContainer
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        ),
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text(
-                            text = if (label == " ") "Space" else label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                        }
+                    )
                 }
+            }
+        }
+    }
+}
+
+/** One key. Colours by role: character, mode switch (black), clear (red), backspace (icon). */
+@Composable
+private fun KeypadKey(
+    label: String,
+    height: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val haptics = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+
+    val isMode = label == "123" || label == "ABC"
+    val isClear = label == "CLR"
+    val (base, pressedColor, content) = when {
+        isMode -> Triple(JackColors.Ink, JackColors.Steel, JackColors.Paper)
+        isClear -> Triple(JackColors.RedTint, JackColors.Red.copy(alpha = 0.25f), JackColors.Red)
+        else -> Triple(JackColors.Paper, JackColors.Line, JackColors.Ink)
+    }
+
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = if (pressed) pressedColor else base,
+        border = BorderStroke(1.dp, if (isClear) JackColors.Red.copy(alpha = 0.4f) else if (isMode) JackColors.Ink else JackColors.Line),
+        shadowElevation = if (pressed) 0.dp else 1.dp,
+        modifier = modifier
+            .height(height)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = when (label) { "⌫" -> "Delete"; " " -> "Space"; "CLR" -> "Clear"; else -> label }
+                ) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                }
+        ) {
+            when (label) {
+                "⌫" -> Icon(Icons.AutoMirrored.Filled.Backspace, contentDescription = "Delete", tint = content, modifier = Modifier.size(22.dp))
+                " " -> Box(Modifier.fillMaxWidth(0.5f).height(3.dp).background(JackColors.Gray))
+                else -> Text(
+                    text = label,
+                    fontFamily = CondensedFamily,
+                    fontSize = if (label.length == 1 && label[0].isDigit()) 24.sp else if (label.length == 1) 18.sp else 15.sp,
+                    color = content,
+                    style = MaterialTheme.typography.titleMedium
+                )
             }
         }
     }

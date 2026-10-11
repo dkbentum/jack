@@ -140,10 +140,16 @@ class Esp32BackgroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // v3.15: Triple Dimension cube as the status-bar icon (white silhouette, res/drawable-*dpi/ic_stat_jack.png),
+        // brand blue accent, and the live ESP32 status as the main line.
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Jack is running 24/7")
-            .setContentText(statusText)
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setSmallIcon(R.drawable.ic_stat_jack)
+            .setColor(0xFF1F6FEB.toInt())
+            .setContentTitle(statusText)
+            .setContentText("Jack keeps the ESP32 linked 24/7 · tap to open")
+            .setSubText("Triple Dimension")
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setShowWhen(false)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

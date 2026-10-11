@@ -127,7 +127,18 @@ class MainActivity : ComponentActivity() {
     private fun addLog(message: String) = JackCore.addLog(message)
 
     private var _showAttendanceDialog = mutableStateOf(false)
-    private var _volumeShortcutFeedback = mutableStateOf<Pair<String, Color>?>(null)
+    private var _volumeShortcutFeedback = mutableStateOf<ShortcutFeedback?>(null)
+    private var shortcutFeedbackJob: kotlinx.coroutines.Job? = null
+
+    /** v3.14: show the shortcut banner for 2.5 s (a newer press replaces it and restarts the timer). */
+    private fun showShortcutFeedback(feedback: ShortcutFeedback) {
+        _volumeShortcutFeedback.value = feedback
+        shortcutFeedbackJob?.cancel()
+        shortcutFeedbackJob = lifecycleScope.launch {
+            kotlinx.coroutines.delay(2500)
+            _volumeShortcutFeedback.value = null
+        }
+    }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         val prefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -136,25 +147,17 @@ class MainActivity : ComponentActivity() {
             when (keyCode) {
                 KeyEvent.KEYCODE_VOLUME_UP -> {
                     _showAttendanceDialog.value = true
-                    _volumeShortcutFeedback.value = "Vol Up: Attendance Triggered" to Color(0xFF4CAF50)
-                    lifecycleScope.launch {
-                        kotlinx.coroutines.delay(2500)
-                        if (_volumeShortcutFeedback.value?.first?.contains("Vol Up") == true) {
-                            _volumeShortcutFeedback.value = null
-                        }
-                    }
+                    showShortcutFeedback(ShortcutFeedback("VOL ▲", "Opening check in / out", JackColors.Blue))
                     return true
                 }
                 KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                    val cmd = "PING\n"
-                    connectionManager?.sendData(cmd.toByteArray())
-                    addLog("📡 Sent 'PING' command to ESP32.")
-                    _volumeShortcutFeedback.value = "Vol Down: Ping Sent" to Color(0xFF2196F3)
-                    lifecycleScope.launch {
-                        kotlinx.coroutines.delay(2500)
-                        if (_volumeShortcutFeedback.value?.first?.contains("Vol Down") == true) {
-                            _volumeShortcutFeedback.value = null
-                        }
+                    if (_connectionStatus.value == ConnectionState.CONNECTED) {
+                        connectionManager?.sendData("PING\n".toByteArray())
+                        addLog("📡 Sent 'PING' command to ESP32.")
+                        showShortcutFeedback(ShortcutFeedback("VOL ▼", "PING sent to the ESP32", JackColors.Green))
+                    } else {
+                        addLog("⚠️ PING not sent — ESP32 is not connected.")
+                        showShortcutFeedback(ShortcutFeedback("VOL ▼", "ESP32 not connected — PING not sent", JackColors.Amber))
                     }
                     return true
                 }
@@ -348,29 +351,12 @@ class MainActivity : ComponentActivity() {
                             transportLabel = if (_transportMode.value == TransportMode.BLE) "Bluetooth" else "USB"
                         )
 
-                        if (feedback != null) {
-                            Surface(
-                                color = feedback!!.second,
-                                shape = RoundedCornerShape(24.dp),
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .padding(top = 40.dp)
-                                    .padding(horizontal = 24.dp),
-                                shadowElevation = 8.dp
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = feedback!!.first,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
+                        ShortcutBanner(
+                            feedback = feedback,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
+                        )
                     }
 
                     if (showConfigDialog) {
